@@ -1,0 +1,138 @@
+{
+  "openrpc": "1.2.6",
+  "info": {
+    "title": "Sagemcom GUI JSON-RPC methods",
+    "description": "Methods used by the Cogeco Sagemcom web GUI over /cgi/json-req. See openapi.yaml for the HTTP form wrapper and METRICS_AND_API.md for auth.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "name": "bridge-mode modem",
+      "url": "https://192.168.100.1/cgi/json-req"
+    }
+  ],
+  "methods": [
+    {
+      "name": "logIn",
+      "summary": "Authenticate and create a session",
+      "params": [
+        {
+          "name": "user",
+          "required": true,
+          "schema": { "type": "string" }
+        },
+        {
+          "name": "persistent",
+          "required": true,
+          "schema": { "type": "string", "enum": ["true", "false"] }
+        },
+        {
+          "name": "session-options",
+          "required": true,
+          "schema": { "$ref": "#/components/schemas/SessionOptions" }
+        }
+      ],
+      "result": {
+        "name": "logInResult",
+        "schema": { "$ref": "#/components/schemas/LogInResponse" }
+      }
+    },
+    {
+      "name": "getValue",
+      "summary": "Read a TR-181 path",
+      "params": [
+        {
+          "name": "xpath",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "examples": [
+              "Device/DeviceInfo/UpTime",
+              "Device/Docsis/CableModem/Downstreams"
+            ]
+          }
+        },
+        {
+          "name": "options",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "properties": {
+              "capability-flags": {
+                "type": "object",
+                "properties": {
+                  "interface": { "type": "boolean", "default": true }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "getValueResult",
+        "schema": {
+          "type": "object",
+          "description": "Shape depends on the requested xpath."
+        }
+      }
+    },
+    {
+      "name": "logOut",
+      "summary": "End the session",
+      "params": [],
+      "result": {
+        "name": "logOutResult",
+        "schema": { "type": "null" }
+      }
+    }
+  ],
+  "components": {
+    "schemas": {
+      "SessionOptions": {
+        "type": "object",
+        "required": ["nss"],
+        "properties": {
+          "nss": {
+            "type": "array",
+            "description": "Must be objects, not the string gtw:tr181, or getValue returns XMO_UNKNOWN_PATH_ERR.",
+            "items": {
+              "type": "object",
+              "required": ["name", "uri"],
+              "properties": {
+                "name": { "type": "string" },
+                "uri": { "type": "string" }
+              }
+            }
+          },
+          "context-flags": {
+            "type": "object",
+            "properties": {
+              "get-content-name": { "type": "boolean" },
+              "local-time": { "type": "boolean" }
+            }
+          },
+          "capability-depth": { "type": "integer", "default": 2 },
+          "capability-flags": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "boolean" },
+              "default-value": { "type": "boolean" },
+              "restriction": { "type": "boolean" },
+              "description": { "type": "boolean" }
+            }
+          },
+          "time-format": { "type": "string", "default": "ISO_8601" },
+          "jwt-auth": { "type": "string", "default": "true" }
+        }
+      },
+      "LogInResponse": {
+        "type": "object",
+        "required": ["id", "nonce"],
+        "properties": {
+          "id": { "type": "string", "description": "session-id for later requests" },
+          "nonce": { "type": "string", "description": "nonce for auth-key calculation" }
+        }
+      }
+    }
+  }
+}

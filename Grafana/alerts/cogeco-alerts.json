@@ -38,13 +38,13 @@
           }
         }
       ],
-      "noDataState": "Alerting",
+      "noDataState": "NoData",
       "execErrState": "Error",
       "for": "3m",
       "labels": {"severity": "critical", "team": "homelab", "service": "cogeco"},
       "annotations": {
         "summary": "Cogeco modem management GUI is unreachable",
-        "description": "cogeco_sagemcom_gui_up has been 0 for 3m. The exporter cannot reach https://192.168.100.1/2.0/gui/.\n\nCheck modem power, LAN path to the bridge management address, and the exporter host."
+        "description": "cogeco_sagemcom_gui_up has been 0 for 3m. The exporter cannot reach https://192.168.100.1/2.0/gui/.\n\nCheck modem power, LAN path to the bridge management address, and the exporter host. Missing series is handled by the exporter-stale rule, not this one."
       }
     },
     {
@@ -134,7 +134,7 @@
       "labels": {"severity": "critical", "team": "homelab", "service": "cogeco"},
       "annotations": {
         "summary": "All Cogeco exporter public TCP probes are down",
-        "description": "min(cogeco_sagemcom_internet_probe_up) has been 0 for 5m. This is a symptom of WAN failure, not proof of a Cogeco outage by itself.\n\nCorrelate with modem GUI/DOCSIS status and UniFi WAN metrics before calling Cogeco."
+        "description": "min(cogeco_sagemcom_internet_probe_up) has been 0 for 5m. This is a symptom of WAN failure, not proof of a Cogeco outage by itself.\n\nCorrelate with modem GUI/DOCSIS status and any upstream WAN metrics before contacting the ISP."
       }
     },
     {
@@ -283,7 +283,7 @@
           "datasourceUid": "grafanacloud-prom",
           "model": {
             "datasource": {"type": "prometheus", "uid": "grafanacloud-prom"},
-            "expr": "sum(rate(cogeco_sagemcom_docsis_downstream_codewords{type=\"uncorrectable\"}[10m]))",
+            "expr": "sum(rate(cogeco_sagemcom_docsis_downstream_codewords_total{type=\"uncorrectable\"}[10m]))",
             "instant": true,
             "refId": "A"
           }

@@ -1,0 +1,18 @@
+// Alloy scrape fragment for cogeco-sagemcom-exporter.
+// Adjust the target address and join your existing remote_write / scrape fan-in.
+// scrape_timeout must stay below scrape_interval (Prometheus/Alloy rule).
+
+prometheus.scrape "cogeco_sagemcom_exporter" {
+  targets = [
+    {
+      __address__ = "cogeco-sagemcom-exporter:9488",
+      job         = "custom/cogeco_sagemcom_exporter",
+    },
+  ]
+
+  forward_to = [prometheus.remote_write.metrics_service.receiver]
+
+  scrape_interval = "60s"
+  scrape_timeout  = "50s"
+  metrics_path    = "/metrics"
+}

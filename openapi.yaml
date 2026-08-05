@@ -1,0 +1,86 @@
+openapi: 3.0.3
+info:
+  title: Sagemcom GUI JSON-RPC HTTP transport
+  description: |
+    HTTP wrapper for the Sagemcom modem JSON-RPC endpoint used by Cogeco firmware.
+
+    POST `/cgi/json-req` with `application/x-www-form-urlencoded` and a single
+    form field `req` containing the JSON envelope string. See METRICS_AND_API.md
+    for the SHA-512 auth algorithm and OpenRPC for method schemas.
+  version: 1.0.0
+servers:
+  - url: https://192.168.100.1
+    description: Default bridge-mode management address
+paths:
+  /cgi/json-req:
+    post:
+      summary: Dispatch JSON-RPC envelope
+      operationId: postJsonRpcEnvelope
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [req]
+              properties:
+                req:
+                  type: string
+                  description: Serialized JSON request envelope.
+                  example: '{"request":{"id":1,"session-id":"14295","priority":true,"cnonce":32145890,"auth-key":"…","actions":[{"id":0,"method":"getValue","xpath":"Device/DeviceInfo/UpTime","options":{"capability-flags":{"interface":true}}}]}}'
+      responses:
+        "200":
+          description: JSON-RPC reply envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JsonRpcResponseEnvelope"
+components:
+  schemas:
+    JsonRpcResponseEnvelope:
+      type: object
+      required: [reply]
+      properties:
+        reply:
+          type: object
+          required: [id, actions]
+          properties:
+            id:
+              type: integer
+            session-id:
+              type: string
+            actions:
+              type: array
+              items:
+                $ref: "#/components/schemas/ActionResponse"
+    ActionResponse:
+      type: object
+      required: [id, error]
+      properties:
+        id:
+          type: integer
+        error:
+          type: object
+          required: [code, description]
+          properties:
+            code:
+              type: integer
+              description: "16777238 indicates success (XMO_NO_ERR)."
+            description:
+              type: string
+        callbacks:
+          type: array
+          items:
+            type: object
+            properties:
+              parameters:
+                type: object
+                properties:
+                  value:
+                    description: getValue payload
+                  id:
+                    type: string
+                    description: Session id from logIn
+                  nonce:
+                    type: string
+                    description: Session nonce from logIn

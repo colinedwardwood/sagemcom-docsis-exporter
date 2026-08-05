@@ -253,7 +253,7 @@
             "uid": "grafanacloud-prom"
           },
           "editorMode": "code",
-          "expr": "cogeco_sagemcom_docsis_registration",
+          "expr": "cogeco_sagemcom_docsis_registered",
           "instant": true,
           "legendFormat": "{{status}}",
           "range": false,
@@ -624,7 +624,7 @@
           "editorMode": "code",
           "expr": "cogeco_sagemcom_docsis_channel_power_dbmv{direction=\"downstream\"}",
           "instant": false,
-          "legendFormat": "{{channel}} {{modulation}}",
+          "legendFormat": "{{direction}} ch{{channel}}",
           "range": true,
           "refId": "A"
         }
@@ -742,7 +742,7 @@
           "editorMode": "code",
           "expr": "cogeco_sagemcom_docsis_downstream_snr_db",
           "instant": false,
-          "legendFormat": "{{channel}} {{modulation}}",
+          "legendFormat": "{{direction}} ch{{channel}}",
           "range": true,
           "refId": "A"
         }
@@ -881,7 +881,7 @@
           "editorMode": "code",
           "expr": "cogeco_sagemcom_docsis_channel_power_dbmv{direction=\"upstream\"}",
           "instant": false,
-          "legendFormat": "{{channel}} {{modulation}}",
+          "legendFormat": "{{direction}} ch{{channel}}",
           "range": true,
           "refId": "A"
         }
@@ -983,7 +983,7 @@
             "uid": "grafanacloud-prom"
           },
           "editorMode": "code",
-          "expr": "rate(cogeco_sagemcom_docsis_downstream_codewords{type=\"uncorrectable\"}[5m])",
+          "expr": "rate(cogeco_sagemcom_docsis_downstream_codewords_total{type=\"uncorrectable\"}[5m])",
           "instant": false,
           "legendFormat": "{{channel}}",
           "range": true,

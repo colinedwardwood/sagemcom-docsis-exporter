@@ -1,5 +1,5 @@
 services:
-  cogeco-sagecom-exporter:
+  cogeco-sagemcom-exporter:
     build: .
     env_file:
       - .env
@@ -7,9 +7,15 @@ services:
       LISTEN_PORT: "9488"
       PROBE_TARGETS: "1.1.1.1:443,8.8.8.8:443"
       COLLECT_DOCSIS: "true"
+      COLLECT_ETHERNET: "true"
+      COLLECT_SYSTEM: "true"
+      SCRAPE_BUDGET_SECONDS: "25"
+      EXPORT_DEVICE_IDENTIFIERS: "false"
     ports:
       - "9488:9488"
     restart: unless-stopped
     read_only: true
     security_opt:
       - no-new-privileges:true
+    cap_drop:
+      - ALL

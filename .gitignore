@@ -1,4 +1,13 @@
 .env
 __pycache__/
 *.py[cod]
+.Python
+.venv/
+venv/
 .DS_Store
+.pytest_cache/
+.mypy_cache/
+Social-posts/
+*.egg-info/
+dist/
+build/
