@@ -373,7 +373,7 @@
           "datasourceUid": "grafanacloud-prom",
           "model": {
             "datasource": {"type": "prometheus", "uid": "grafanacloud-prom"},
-            "expr": "time() - max(timestamp(cogeco_sagemcom_gui_up)) > 900",
+            "expr": "(time() - max(timestamp(cogeco_sagemcom_gui_up)) > bool 900) or vector(0)",
             "instant": true,
             "refId": "A"
           }
