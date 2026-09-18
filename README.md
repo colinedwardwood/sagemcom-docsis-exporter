@@ -101,6 +101,14 @@ export GRAFANA_API_KEY=...   # or ~/.tokens/grafana-<org-slug>/grafana-api.key
 ./Grafana/deploy.sh
 ```
 
+If you're importing the dashboard by hand into a Grafana instance that isn't
+using `deploy.sh` (e.g. via **Dashboards → New → Import**), use
+[`sagemcom-docsis-modem.shared.json`](Grafana/dashboards/sagemcom-docsis-modem.shared.json)
+instead of the plain `sagemcom-docsis-modem.json` — it templates the
+datasource as an input (`${DS_PROMETHEUS}`) so Grafana prompts you to pick
+your own Prometheus datasource rather than assuming the `grafanacloud-prom`
+UID this repo's own Grafana Cloud stack uses.
+
 ## Design choices
 
 - **Python stdlib only** — no pip dependencies; small Alpine image
