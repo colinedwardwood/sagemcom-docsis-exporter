@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Push Cogeco modem dashboard + alerts to Grafana Cloud (Network folder).
+# Push the Sagemcom DOCSIS modem dashboard + alerts to Grafana Cloud (Network folder).
 #
 # Required:
 #   GRAFANA_ORG_SLUG   Grafana Cloud stack slug (URL becomes https://<slug>.grafana.net)
@@ -35,7 +35,7 @@ fi
 
 FOLDER_TITLE="Network"
 FOLDER_UID="network"
-ALERT_GROUP="Cogeco%20Modem"
+ALERT_GROUP="Sagemcom%20DOCSIS%20Modem"
 
 if [[ -z "$GRAFANA_API_KEY" ]]; then
   echo "ERROR: GRAFANA_API_KEY is not set and $TOKEN_DIR/grafana-api.key not found." >&2
@@ -79,27 +79,27 @@ PYEOF
 done
 
 log "Pushing alert rules..."
-ALERTS_FILE="$SCRIPT_DIR/alerts/cogeco-alerts.json"
-HTTP_STATUS=$(curl -s -o /tmp/cogeco-alert-resp.json -w "%{http_code}" -X PUT \
+ALERTS_FILE="$SCRIPT_DIR/alerts/sagemcom-docsis-alerts.json"
+HTTP_STATUS=$(curl -s -o /tmp/sagemcom-docsis-alert-resp.json -w "%{http_code}" -X PUT \
   -H "$AUTH" -H "Content-Type: application/json" \
   --data @"$ALERTS_FILE" \
   "$GRAFANA_URL/api/v1/provisioning/folder/$FOLDER_UID/rule-groups/$ALERT_GROUP")
 
 if [[ "$HTTP_STATUS" == "202" || "$HTTP_STATUS" == "200" ]]; then
   RULE_COUNT=$(python3 -c "import json; print(len(json.load(open('$ALERTS_FILE'))['rules']))")
-  ok "$RULE_COUNT alert rules pushed to folder '$FOLDER_TITLE' / group 'Cogeco Modem'."
+  ok "$RULE_COUNT alert rules pushed to folder '$FOLDER_TITLE' / group 'Sagemcom DOCSIS Modem'."
 else
   echo "Response body:" >&2
-  cat /tmp/cogeco-alert-resp.json >&2
+  cat /tmp/sagemcom-docsis-alert-resp.json >&2
   fail "Alert rule push failed with HTTP $HTTP_STATUS."
 fi
 
 log "Done."
 echo ""
-echo "  Dashboard: $GRAFANA_URL/d/cogeco-sagemcom-modem/cogeco-sagemcom-modem"
+echo "  Dashboard: $GRAFANA_URL/d/sagemcom-docsis-modem/sagemcom-docsis-modem"
 echo "  Folder:    $GRAFANA_URL/dashboards/f/$FOLDER_UID"
-echo "  Alerts:    $GRAFANA_URL/alerting/list?search=Cogeco"
+echo "  Alerts:    $GRAFANA_URL/alerting/list?search=Sagemcom"
 echo ""
-echo "Note: cogeco_* metrics are not in Grafana Cloud yet. Start the exporter and"
-echo "add an Alloy scrape (job custom/cogeco_sagemcom_exporter → :9488/metrics)."
+echo "Note: sagemcom_* metrics are not in Grafana Cloud yet. Start the exporter and"
+echo "add an Alloy scrape (job custom/sagemcom_docsis_exporter → :9488/metrics)."
 echo ""

@@ -1,13 +1,36 @@
-# Cogeco Sagemcom exporter
+# Sagemcom DOCSIS cable modem exporter
 
-Prometheus exporter for Cogeco Sagemcom cable modems (tested on the F3896 in
-bridge mode). It scrapes the modem's authenticated JSON-RPC management API and
-exposes DOCSIS, Ethernet, and system telemetry on `:9488/metrics`.
+Prometheus exporter for Sagemcom F3896/FAST3896S cable gateways (tested on
+Cogeco's F3896 in bridge mode). It scrapes the modem's authenticated JSON-RPC
+management API and exposes DOCSIS, Ethernet, and system telemetry on
+`:9488/metrics`.
 
-Cogeco's firmware redirects the documented F3896 REST URLs back to the GUI.
-This exporter talks to the same `/cgi/json-req` endpoint the web UI uses.
+This firmware redirects the documented F3896 REST URLs back to the GUI. This
+exporter talks to the same `/cgi/json-req` endpoint the web UI uses instead.
 
 It never calls reboot, reset, configuration, or other write methods.
+
+## Should this work on your modem/ISP?
+
+Probably, if you have a Sagemcom **F3896** or **FAST3896S** cable gateway —
+this is Sagemcom's general DOCSIS 3.1 cable-gateway hardware, not a
+Cogeco-exclusive device. It's confirmed built and tested against Cogeco's
+firmware; Breezeline (US, formerly Atlantic Broadband) deploys the same
+hardware under their own firmware build and is a likely (untested) fit. If
+you try it on another ISP's F3896/FAST3896S and it works (or needs a tweak),
+please open an issue or PR — that's exactly the kind of report that makes
+this more broadly useful.
+
+The underlying `/cgi/json-req` JSON-RPC API (and its `XMO_*` error codes,
+`tr181` namespace) is also shared much more broadly across Sagemcom's F@st
+router family, which ISPs white-label for fibre/DSL gateways too — e.g. Bell's
+Home Hub, Proximus's b-box, BT's Smart Hub. If your device is one of those
+non-DOCSIS F@st routers rather than a cable modem, see
+[`sagemcom_fast_exporter`](https://github.com/hairyhenderson/sagemcom_fast_exporter)
+(by a colleague of mine at Grafana Labs) — it targets that broader fibre-hub
+family generically. This exporter is narrower and DOCSIS-specific: cable
+channel lock/power/SNR/codewords, thermal throttle, and the other cable-modem
+telemetry Sagemcom's generic F@st API doesn't cover.
 
 ## What it exposes
 
@@ -34,11 +57,11 @@ curl -s http://127.0.0.1:9488/metrics | head
 ```
 
 Point Prometheus or Grafana Alloy at `http://<exporter-host>:9488/metrics`.
-An Alloy scrape fragment lives in [`alloy/cogeco-sagemcom.alloy`](alloy/cogeco-sagemcom.alloy)
+An Alloy scrape fragment lives in [`alloy/sagemcom-docsis.alloy`](alloy/sagemcom-docsis.alloy)
 (**60s** interval, **50s** timeout).
 
 `/healthz` only checks that the exporter process is up. Use
-`cogeco_sagemcom_docsis_scrape_up` (or `cogeco_sagemcom_api_up` when
+`sagemcom_docsis_scrape_up` (or `sagemcom_api_up` when
 `CHECK_API_LOGIN=true`) for modem/API health.
 
 ## Configuration
@@ -94,5 +117,6 @@ python3 -m unittest discover -s tests -t . -v
 
 ## Disclaimer
 
-Unofficial. Not affiliated with Cogeco or Sagemcom. Use on equipment you
-administer. Credentials stay in `.env` (gitignored) or your secret store.
+Unofficial. Not affiliated with Cogeco, Breezeline, or Sagemcom. Use on
+equipment you administer. Credentials stay in `.env` (gitignored) or your
+secret store.

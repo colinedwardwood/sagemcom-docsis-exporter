@@ -1,12 +1,12 @@
-// Alloy scrape fragment for cogeco-sagemcom-exporter.
+// Alloy scrape fragment for sagemcom-docsis-exporter.
 // Adjust the target address and join your existing remote_write / scrape fan-in.
 // scrape_timeout must stay below scrape_interval (Prometheus/Alloy rule).
 
-prometheus.scrape "cogeco_sagemcom_exporter" {
+prometheus.scrape "sagemcom_docsis_exporter" {
   targets = [
     {
-      __address__ = "cogeco-sagemcom-exporter:9488",
-      job         = "custom/cogeco_sagemcom_exporter",
+      __address__ = "sagemcom-docsis-exporter:9488",
+      job         = "custom/sagemcom_docsis_exporter",
     },
   ]
 

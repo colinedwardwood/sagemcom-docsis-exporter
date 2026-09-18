@@ -2,7 +2,7 @@
   "openrpc": "1.2.6",
   "info": {
     "title": "Sagemcom GUI JSON-RPC methods",
-    "description": "Methods used by the Cogeco Sagemcom web GUI over /cgi/json-req. See openapi.yaml for the HTTP form wrapper and METRICS_AND_API.md for auth.",
+    "description": "Methods used by the Sagemcom F3896/FAST3896S cable-gateway web GUI (observed on Cogeco and Breezeline builds) over /cgi/json-req. See openapi.yaml for the HTTP form wrapper and METRICS_AND_API.md for auth.",
     "version": "1.0.0"
   },
   "servers": [

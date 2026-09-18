@@ -1,5 +1,5 @@
 services:
-  cogeco-sagemcom-exporter:
+  sagemcom-docsis-exporter:
     build: .
     env_file:
       - .env

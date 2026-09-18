@@ -2,7 +2,9 @@ openapi: 3.0.3
 info:
   title: Sagemcom GUI JSON-RPC HTTP transport
   description: |
-    HTTP wrapper for the Sagemcom modem JSON-RPC endpoint used by Cogeco firmware.
+    HTTP wrapper for the Sagemcom modem JSON-RPC endpoint used by F3896/FAST3896S
+    cable-gateway firmware (observed on Cogeco and Breezeline builds; likely
+    shared across other ISPs on the same Sagemcom firmware).
 
     POST `/cgi/json-req` with `application/x-www-form-urlencoded` and a single
     form field `req` containing the JSON envelope string. See METRICS_AND_API.md

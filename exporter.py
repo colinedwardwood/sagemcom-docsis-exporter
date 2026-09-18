@@ -1,4 +1,4 @@
-"""Prometheus exporter for Cogeco's Sagemcom GUI JSON-RPC interface."""
+"""Prometheus exporter for Sagemcom F3896/FAST3896S cable-gateway GUIs (JSON-RPC)."""
 
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ EXPORT_DEVICE_IDENTIFIERS = os.environ.get("EXPORT_DEVICE_IDENTIFIERS", "false")
 # Hard ceiling for modem work; must stay under Alloy/Prometheus scrape_timeout.
 SCRAPE_BUDGET_SECONDS = float(os.environ.get("SCRAPE_BUDGET_SECONDS", "25"))
 
-# Cogeco's GUI passes namespace objects, not the "gtw:tr181" option string.
+# This firmware's GUI passes namespace objects, not the "gtw:tr181" option string.
 # A string nss still logs in, but every getValue then returns XMO_UNKNOWN_PATH_ERR.
 SESSION_NSS = (
     {"name": "gtw", "uri": "http://sagemcom.com/gateway-data"},
@@ -61,7 +61,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s",
     stream=sys.stderr,
 )
-log = logging.getLogger("cogeco-sagemcom-exporter")
+log = logging.getLogger("sagemcom-docsis-exporter")
 
 
 def sha512(value: str) -> str:
@@ -183,7 +183,7 @@ class ModemClient:
                     "method": "logIn",
                     "parameters": {
                         "user": USERNAME,
-                        # Cogeco accepts non-persistent logins but does not return
+                        # This firmware accepts non-persistent logins but does not return
                         # usable session credentials for them; persistent + logout.
                         "persistent": "true",
                         "session-options": {
@@ -364,7 +364,7 @@ def interface_list(value: object) -> list[dict]:
 
 def scrape_error_metric(stage: str, error: str) -> str:
     return metric(
-        "cogeco_sagemcom_scrape_error_info",
+        "sagemcom_scrape_error_info",
         1,
         {"stage": stage, "error": sanitize_error_label(error)},
     )
@@ -372,18 +372,18 @@ def scrape_error_metric(stage: str, error: str) -> str:
 
 def docsis_channel_metrics(downstream: object, upstream: object) -> list[str]:
     lines = [
-        "# HELP cogeco_sagemcom_docsis_channel_info DOCSIS channel metadata.\n",
-        "# TYPE cogeco_sagemcom_docsis_channel_info gauge\n",
-        "# HELP cogeco_sagemcom_docsis_channel_lock DOCSIS channel lock state.\n",
-        "# TYPE cogeco_sagemcom_docsis_channel_lock gauge\n",
-        "# HELP cogeco_sagemcom_docsis_channel_frequency_hertz DOCSIS channel frequency.\n",
-        "# TYPE cogeco_sagemcom_docsis_channel_frequency_hertz gauge\n",
-        "# HELP cogeco_sagemcom_docsis_channel_power_dbmv DOCSIS signal power.\n",
-        "# TYPE cogeco_sagemcom_docsis_channel_power_dbmv gauge\n",
-        "# HELP cogeco_sagemcom_docsis_downstream_snr_db DOCSIS downstream signal-to-noise ratio.\n",
-        "# TYPE cogeco_sagemcom_docsis_downstream_snr_db gauge\n",
-        "# HELP cogeco_sagemcom_docsis_downstream_codewords_total DOCSIS downstream codeword counts.\n",
-        "# TYPE cogeco_sagemcom_docsis_downstream_codewords_total counter\n",
+        "# HELP sagemcom_docsis_channel_info DOCSIS channel metadata.\n",
+        "# TYPE sagemcom_docsis_channel_info gauge\n",
+        "# HELP sagemcom_docsis_channel_lock DOCSIS channel lock state.\n",
+        "# TYPE sagemcom_docsis_channel_lock gauge\n",
+        "# HELP sagemcom_docsis_channel_frequency_hertz DOCSIS channel frequency.\n",
+        "# TYPE sagemcom_docsis_channel_frequency_hertz gauge\n",
+        "# HELP sagemcom_docsis_channel_power_dbmv DOCSIS signal power.\n",
+        "# TYPE sagemcom_docsis_channel_power_dbmv gauge\n",
+        "# HELP sagemcom_docsis_downstream_snr_db DOCSIS downstream signal-to-noise ratio.\n",
+        "# TYPE sagemcom_docsis_downstream_snr_db gauge\n",
+        "# HELP sagemcom_docsis_downstream_codewords_total DOCSIS downstream codeword counts.\n",
+        "# TYPE sagemcom_docsis_downstream_codewords_total counter\n",
     ]
     for direction, channels in (("downstream", downstream), ("upstream", upstream)):
         if not isinstance(channels, list):
@@ -396,26 +396,26 @@ def docsis_channel_metrics(downstream: object, upstream: object) -> list[str]:
             modulation = str(channel.get("Modulation") or "unknown")
             lines.append(
                 metric(
-                    "cogeco_sagemcom_docsis_channel_info",
+                    "sagemcom_docsis_channel_info",
                     1,
                     identity | {"modulation": modulation},
                 )
             )
             locked = as_bool(channel.get("LockStatus"))
             if locked is not None:
-                lines.append(metric("cogeco_sagemcom_docsis_channel_lock", int(locked), identity))
+                lines.append(metric("sagemcom_docsis_channel_lock", int(locked), identity))
             frequency = finite_float(channel.get("Frequency"))
             if frequency is not None:
                 lines.append(
-                    metric("cogeco_sagemcom_docsis_channel_frequency_hertz", frequency, identity)
+                    metric("sagemcom_docsis_channel_frequency_hertz", frequency, identity)
                 )
             power = finite_float(channel.get("PowerLevel"))
             if power is not None:
-                lines.append(metric("cogeco_sagemcom_docsis_channel_power_dbmv", power, identity))
+                lines.append(metric("sagemcom_docsis_channel_power_dbmv", power, identity))
             if direction == "downstream":
                 snr = finite_float(channel.get("SNR"))
                 if snr is not None:
-                    lines.append(metric("cogeco_sagemcom_docsis_downstream_snr_db", snr, identity))
+                    lines.append(metric("sagemcom_docsis_downstream_snr_db", snr, identity))
                 for source, error_type in (
                     ("CorrectableCodewords", "correctable"),
                     ("UncorrectableCodewords", "uncorrectable"),
@@ -426,7 +426,7 @@ def docsis_channel_metrics(downstream: object, upstream: object) -> list[str]:
                         continue
                     lines.append(
                         metric(
-                            "cogeco_sagemcom_docsis_downstream_codewords_total",
+                            "sagemcom_docsis_downstream_codewords_total",
                             count,
                             identity | {"type": error_type},
                         )
@@ -436,20 +436,20 @@ def docsis_channel_metrics(downstream: object, upstream: object) -> list[str]:
 
 def ethernet_metrics(interfaces: object) -> list[str]:
     lines = [
-        "# HELP cogeco_sagemcom_ethernet_up Whether an Ethernet interface is up.\n",
-        "# TYPE cogeco_sagemcom_ethernet_up gauge\n",
-        "# HELP cogeco_sagemcom_ethernet_speed_mbps Current Ethernet link speed.\n",
-        "# TYPE cogeco_sagemcom_ethernet_speed_mbps gauge\n",
-        "# HELP cogeco_sagemcom_ethernet_info Ethernet interface metadata.\n",
-        "# TYPE cogeco_sagemcom_ethernet_info gauge\n",
-        "# HELP cogeco_sagemcom_ethernet_bytes_total Ethernet byte counters.\n",
-        "# TYPE cogeco_sagemcom_ethernet_bytes_total counter\n",
-        "# HELP cogeco_sagemcom_ethernet_packets_total Ethernet packet counters.\n",
-        "# TYPE cogeco_sagemcom_ethernet_packets_total counter\n",
-        "# HELP cogeco_sagemcom_ethernet_errors_total Ethernet error counters.\n",
-        "# TYPE cogeco_sagemcom_ethernet_errors_total counter\n",
-        "# HELP cogeco_sagemcom_ethernet_discards_total Ethernet discard counters.\n",
-        "# TYPE cogeco_sagemcom_ethernet_discards_total counter\n",
+        "# HELP sagemcom_ethernet_up Whether an Ethernet interface is up.\n",
+        "# TYPE sagemcom_ethernet_up gauge\n",
+        "# HELP sagemcom_ethernet_speed_mbps Current Ethernet link speed.\n",
+        "# TYPE sagemcom_ethernet_speed_mbps gauge\n",
+        "# HELP sagemcom_ethernet_info Ethernet interface metadata.\n",
+        "# TYPE sagemcom_ethernet_info gauge\n",
+        "# HELP sagemcom_ethernet_bytes_total Ethernet byte counters.\n",
+        "# TYPE sagemcom_ethernet_bytes_total counter\n",
+        "# HELP sagemcom_ethernet_packets_total Ethernet packet counters.\n",
+        "# TYPE sagemcom_ethernet_packets_total counter\n",
+        "# HELP sagemcom_ethernet_errors_total Ethernet error counters.\n",
+        "# TYPE sagemcom_ethernet_errors_total counter\n",
+        "# HELP sagemcom_ethernet_discards_total Ethernet discard counters.\n",
+        "# TYPE sagemcom_ethernet_discards_total counter\n",
     ]
     for iface in interface_list(interfaces):
         alias = str(iface.get("Alias") or iface.get("uid") or "unknown")
@@ -466,18 +466,18 @@ def ethernet_metrics(interfaces: object) -> list[str]:
         }
         if EXPORT_DEVICE_IDENTIFIERS:
             info_labels["mac"] = str(iface.get("MACAddress") or "")
-        lines.append(metric("cogeco_sagemcom_ethernet_up", int(status.upper() == "UP"), labels))
+        lines.append(metric("sagemcom_ethernet_up", int(status.upper() == "UP"), labels))
         speed = finite_float(iface.get("CurrentBitRate"))
         if speed is not None:
-            lines.append(metric("cogeco_sagemcom_ethernet_speed_mbps", speed, labels))
-        lines.append(metric("cogeco_sagemcom_ethernet_info", 1, info_labels))
+            lines.append(metric("sagemcom_ethernet_speed_mbps", speed, labels))
+        lines.append(metric("sagemcom_ethernet_info", 1, info_labels))
         # Prefer omit over NaN for counters.
         for metric_name, received_key, sent_key in (
-            ("cogeco_sagemcom_ethernet_bytes_total", "BytesReceived", "BytesSent"),
-            ("cogeco_sagemcom_ethernet_packets_total", "PacketsReceived", "PacketsSent"),
-            ("cogeco_sagemcom_ethernet_errors_total", "ErrorsReceived", "ErrorsSent"),
+            ("sagemcom_ethernet_bytes_total", "BytesReceived", "BytesSent"),
+            ("sagemcom_ethernet_packets_total", "PacketsReceived", "PacketsSent"),
+            ("sagemcom_ethernet_errors_total", "ErrorsReceived", "ErrorsSent"),
             (
-                "cogeco_sagemcom_ethernet_discards_total",
+                "sagemcom_ethernet_discards_total",
                 "DiscardPacketsReceived",
                 "DiscardPacketsSent",
             ),
@@ -492,20 +492,20 @@ def ethernet_metrics(interfaces: object) -> list[str]:
 
 def system_metrics(snapshot: dict[str, object]) -> list[str]:
     lines = [
-        "# HELP cogeco_sagemcom_modem_info Modem identity labels.\n",
-        "# TYPE cogeco_sagemcom_modem_info gauge\n",
-        "# HELP cogeco_sagemcom_reboot_count Modem reboot count from DeviceInfo.\n",
-        "# TYPE cogeco_sagemcom_reboot_count gauge\n",
-        "# HELP cogeco_sagemcom_memory_bytes Modem memory totals from DeviceInfo.\n",
-        "# TYPE cogeco_sagemcom_memory_bytes gauge\n",
-        "# HELP cogeco_sagemcom_cpu_usage_percent Modem reported CPU usage.\n",
-        "# TYPE cogeco_sagemcom_cpu_usage_percent gauge\n",
-        "# HELP cogeco_sagemcom_load_average Modem load averages.\n",
-        "# TYPE cogeco_sagemcom_load_average gauge\n",
-        "# HELP cogeco_sagemcom_temperature_celsius Modem temperature sensor reading.\n",
-        "# TYPE cogeco_sagemcom_temperature_celsius gauge\n",
-        "# HELP cogeco_sagemcom_thermal_throttle Modem DOCSIS thermal throttle state.\n",
-        "# TYPE cogeco_sagemcom_thermal_throttle gauge\n",
+        "# HELP sagemcom_modem_info Modem identity labels.\n",
+        "# TYPE sagemcom_modem_info gauge\n",
+        "# HELP sagemcom_reboot_count Modem reboot count from DeviceInfo.\n",
+        "# TYPE sagemcom_reboot_count gauge\n",
+        "# HELP sagemcom_memory_bytes Modem memory totals from DeviceInfo.\n",
+        "# TYPE sagemcom_memory_bytes gauge\n",
+        "# HELP sagemcom_cpu_usage_percent Modem reported CPU usage.\n",
+        "# TYPE sagemcom_cpu_usage_percent gauge\n",
+        "# HELP sagemcom_load_average Modem load averages.\n",
+        "# TYPE sagemcom_load_average gauge\n",
+        "# HELP sagemcom_temperature_celsius Modem temperature sensor reading.\n",
+        "# TYPE sagemcom_temperature_celsius gauge\n",
+        "# HELP sagemcom_thermal_throttle Modem DOCSIS thermal throttle state.\n",
+        "# TYPE sagemcom_thermal_throttle gauge\n",
     ]
     info_labels = {
         "model": str(snapshot.get("model") or ""),
@@ -514,13 +514,13 @@ def system_metrics(snapshot: dict[str, object]) -> list[str]:
     }
     if EXPORT_DEVICE_IDENTIFIERS:
         info_labels["serial"] = str(snapshot.get("serial") or "")
-    lines.append(metric("cogeco_sagemcom_modem_info", 1, info_labels))
+    lines.append(metric("sagemcom_modem_info", 1, info_labels))
     reboot = finite_float(snapshot.get("reboot_count"))
     if reboot is not None:
-        lines.append(metric("cogeco_sagemcom_reboot_count", reboot))
+        lines.append(metric("sagemcom_reboot_count", reboot))
     throttle = finite_float(snapshot.get("thermal_throttle"))
     if throttle is not None:
-        lines.append(metric("cogeco_sagemcom_thermal_throttle", throttle))
+        lines.append(metric("sagemcom_thermal_throttle", throttle))
 
     memory = unwrap(snapshot.get("memory"), "MemoryStatus")
     if isinstance(memory, dict):
@@ -528,20 +528,20 @@ def system_metrics(snapshot: dict[str, object]) -> list[str]:
             kib = finite_float(memory.get(key))
             if kib is None:
                 continue
-            lines.append(metric("cogeco_sagemcom_memory_bytes", kib * 1024.0, {"type": label}))
+            lines.append(metric("sagemcom_memory_bytes", kib * 1024.0, {"type": label}))
 
     process = unwrap(snapshot.get("process"), "ProcessStatus")
     if isinstance(process, dict):
         cpu = finite_float(process.get("CPUUsage"))
         if cpu is not None:
-            lines.append(metric("cogeco_sagemcom_cpu_usage_percent", cpu))
+            lines.append(metric("sagemcom_cpu_usage_percent", cpu))
         load = process.get("LoadAverage")
         if isinstance(load, dict):
             for key, label in (("Load1", "1m"), ("Load5", "5m"), ("Load15", "15m")):
                 value = finite_float(load.get(key))
                 if value is None:
                     continue
-                lines.append(metric("cogeco_sagemcom_load_average", value, {"window": label}))
+                lines.append(metric("sagemcom_load_average", value, {"window": label}))
 
     temperature = unwrap(snapshot.get("temperature"), "TemperatureStatus")
     sensors: list[object] = []
@@ -553,12 +553,13 @@ def system_metrics(snapshot: dict[str, object]) -> list[str]:
         if not isinstance(sensor, dict):
             continue
         value = finite_float(sensor.get("Value"))
-        # Cogeco leaves several sensors disabled with nonsense placeholders (~-85°C).
+        # Some deployments (observed on Cogeco) leave several sensors disabled with
+        # nonsense placeholders (~-85°C).
         if value is None or value < -40:
             continue
         lines.append(
             metric(
-                "cogeco_sagemcom_temperature_celsius",
+                "sagemcom_temperature_celsius",
                 value,
                 {
                     "sensor": str(sensor.get("Alias") or sensor.get("uid") or "unknown"),
@@ -574,24 +575,24 @@ def registration_metrics(status: object) -> list[str]:
     status_text = str(status or "unknown")
     registered = int(status_text.strip().lower() in REGISTERED_STATUSES)
     return [
-        "# HELP cogeco_sagemcom_docsis_registered Whether DOCSIS registration looks online.\n",
-        "# TYPE cogeco_sagemcom_docsis_registered gauge\n",
-        "# HELP cogeco_sagemcom_docsis_registration_info DOCSIS registration status label.\n",
-        "# TYPE cogeco_sagemcom_docsis_registration_info gauge\n",
-        metric("cogeco_sagemcom_docsis_registered", registered),
-        metric("cogeco_sagemcom_docsis_registration_info", 1, {"status": status_text}),
+        "# HELP sagemcom_docsis_registered Whether DOCSIS registration looks online.\n",
+        "# TYPE sagemcom_docsis_registered gauge\n",
+        "# HELP sagemcom_docsis_registration_info DOCSIS registration status label.\n",
+        "# TYPE sagemcom_docsis_registration_info gauge\n",
+        metric("sagemcom_docsis_registered", registered),
+        metric("sagemcom_docsis_registration_info", 1, {"status": status_text}),
     ]
 
 
 def modem_api_metrics(client: ModemClient) -> tuple[list[str], str | None]:
     snapshot = client.modem_snapshot()
     lines = [
-        "# HELP cogeco_sagemcom_uptime_seconds Modem uptime; a decrease indicates a restart.\n",
-        "# TYPE cogeco_sagemcom_uptime_seconds gauge\n",
+        "# HELP sagemcom_uptime_seconds Modem uptime; a decrease indicates a restart.\n",
+        "# TYPE sagemcom_uptime_seconds gauge\n",
     ]
     uptime = finite_float(snapshot["uptime"])
     if uptime is not None:
-        lines.append(metric("cogeco_sagemcom_uptime_seconds", uptime))
+        lines.append(metric("sagemcom_uptime_seconds", uptime))
     lines.extend(registration_metrics(snapshot["status"]))
     lines.extend(docsis_channel_metrics(snapshot["downstream"], snapshot["upstream"]))
     if COLLECT_ETHERNET and "ethernet" in snapshot:
@@ -611,28 +612,28 @@ def collect_modem_metrics(deadline: Deadline) -> list[str]:
     lines: list[str] = []
     lines.extend(
         _help_type(
-            "cogeco_sagemcom_gui_up",
+            "sagemcom_gui_up",
             "Whether the modem management interface is reachable.",
             "gauge",
         )
     )
     lines.extend(
         _help_type(
-            "cogeco_sagemcom_gui_request_duration_seconds",
+            "sagemcom_gui_request_duration_seconds",
             "Modem management interface response time.",
             "gauge",
         )
     )
     lines.extend(
         _help_type(
-            "cogeco_sagemcom_scrape_error_info",
+            "sagemcom_scrape_error_info",
             "Labeled scrape error detail for the latest modem collection attempt.",
             "gauge",
         )
     )
     lines.extend(
         _help_type(
-            "cogeco_sagemcom_logout_success",
+            "sagemcom_logout_success",
             "Whether the latest modem session logout succeeded.",
             "gauge",
         )
@@ -640,20 +641,20 @@ def collect_modem_metrics(deadline: Deadline) -> list[str]:
 
     client = ModemClient(deadline=deadline)
     success, duration = client.check_gui()
-    lines.append(metric("cogeco_sagemcom_gui_up", int(success)))
-    lines.append(metric("cogeco_sagemcom_gui_request_duration_seconds", duration))
+    lines.append(metric("sagemcom_gui_up", int(success)))
+    lines.append(metric("sagemcom_gui_request_duration_seconds", duration))
 
     if CHECK_API_LOGIN:
         lines.extend(
             _help_type(
-                "cogeco_sagemcom_api_up",
+                "sagemcom_api_up",
                 "Whether the modem JSON-RPC login succeeded.",
                 "gauge",
             )
         )
         lines.extend(
             _help_type(
-                "cogeco_sagemcom_api_request_duration_seconds",
+                "sagemcom_api_request_duration_seconds",
                 "JSON-RPC login duration.",
                 "gauge",
             )
@@ -662,15 +663,15 @@ def collect_modem_metrics(deadline: Deadline) -> list[str]:
         # on the same nonce state — still a second login by design when enabled.
         api_client = ModemClient(deadline=deadline)
         api_success, api_duration = api_client.check_login()
-        lines.append(metric("cogeco_sagemcom_api_up", int(api_success)))
-        lines.append(metric("cogeco_sagemcom_api_request_duration_seconds", api_duration))
+        lines.append(metric("sagemcom_api_up", int(api_success)))
+        lines.append(metric("sagemcom_api_request_duration_seconds", api_duration))
 
     if not COLLECT_DOCSIS:
         return lines
 
     lines.extend(
         _help_type(
-            "cogeco_sagemcom_docsis_scrape_up",
+            "sagemcom_docsis_scrape_up",
             "Whether the modem API scrape succeeded.",
             "gauge",
         )
@@ -678,14 +679,14 @@ def collect_modem_metrics(deadline: Deadline) -> list[str]:
     try:
         api_lines, logout_error = modem_api_metrics(client)
         lines.extend(api_lines)
-        lines.append(metric("cogeco_sagemcom_docsis_scrape_up", 1))
-        lines.append(metric("cogeco_sagemcom_logout_success", 0 if logout_error else 1))
+        lines.append(metric("sagemcom_docsis_scrape_up", 1))
+        lines.append(metric("sagemcom_logout_success", 0 if logout_error else 1))
         if logout_error:
             lines.append(scrape_error_metric("logout", logout_error))
     except Exception as exc:  # noqa: BLE001 — exporters must not 500 on target faults
         log.exception("DOCSIS scrape failed")
-        lines.append(metric("cogeco_sagemcom_docsis_scrape_up", 0))
-        lines.append(metric("cogeco_sagemcom_logout_success", 0))
+        lines.append(metric("sagemcom_docsis_scrape_up", 0))
+        lines.append(metric("sagemcom_logout_success", 0))
         stage = "deadline" if isinstance(exc, DeadlineExceeded) else "docsis"
         lines.append(scrape_error_metric(stage, f"{type(exc).__name__}: {exc}"))
     return lines
@@ -693,13 +694,13 @@ def collect_modem_metrics(deadline: Deadline) -> list[str]:
 
 def collect_probe_metrics() -> list[str]:
     lines = _help_type(
-        "cogeco_sagemcom_internet_probe_up",
+        "sagemcom_internet_probe_up",
         "TCP reachability from the exporter host.",
         "gauge",
     )
     lines.extend(
         _help_type(
-            "cogeco_sagemcom_internet_probe_duration_seconds",
+            "sagemcom_internet_probe_duration_seconds",
             "TCP connection duration.",
             "gauge",
         )
@@ -707,9 +708,9 @@ def collect_probe_metrics() -> list[str]:
     for target in PROBE_TARGETS:
         reachable, probe_duration = tcp_probe(target)
         labels = {"target": target}
-        lines.append(metric("cogeco_sagemcom_internet_probe_up", int(reachable), labels))
+        lines.append(metric("sagemcom_internet_probe_up", int(reachable), labels))
         lines.append(
-            metric("cogeco_sagemcom_internet_probe_duration_seconds", probe_duration, labels)
+            metric("sagemcom_internet_probe_duration_seconds", probe_duration, labels)
         )
     return lines
 
@@ -722,14 +723,14 @@ def collect_metrics() -> str:
     lines.extend(collect_probe_metrics())
     lines.extend(
         _help_type(
-            "cogeco_sagemcom_scrape_duration_seconds",
+            "sagemcom_scrape_duration_seconds",
             "Exporter scrape wall time.",
             "gauge",
         )
     )
     # duration from deadline start
     started = deadline.deadline - SCRAPE_BUDGET_SECONDS
-    lines.append(metric("cogeco_sagemcom_scrape_duration_seconds", time.monotonic() - started))
+    lines.append(metric("sagemcom_scrape_duration_seconds", time.monotonic() - started))
     return "".join(lines)
 
 
@@ -747,12 +748,12 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:  # noqa: BLE001
             log.exception("unhandled scrape failure")
             body = (
-                "# HELP cogeco_sagemcom_docsis_scrape_up Whether the modem API scrape succeeded.\n"
-                "# TYPE cogeco_sagemcom_docsis_scrape_up gauge\n"
-                "cogeco_sagemcom_docsis_scrape_up 0\n"
-                '# HELP cogeco_sagemcom_scrape_error_info Labeled scrape error detail.\n'
-                "# TYPE cogeco_sagemcom_scrape_error_info gauge\n"
-                'cogeco_sagemcom_scrape_error_info{stage="handler",error="unhandled"} 1\n'
+                "# HELP sagemcom_docsis_scrape_up Whether the modem API scrape succeeded.\n"
+                "# TYPE sagemcom_docsis_scrape_up gauge\n"
+                "sagemcom_docsis_scrape_up 0\n"
+                '# HELP sagemcom_scrape_error_info Labeled scrape error detail.\n'
+                "# TYPE sagemcom_scrape_error_info gauge\n"
+                'sagemcom_scrape_error_info{stage="handler",error="unhandled"} 1\n'
             ).encode()
         self.send_response(200)
         self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")

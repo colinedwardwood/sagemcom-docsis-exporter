@@ -1,4 +1,4 @@
-"""Unit and fixture tests for the Cogeco Sagemcom exporter."""
+"""Unit and fixture tests for the Sagemcom DOCSIS cable-gateway exporter."""
 
 from __future__ import annotations
 
@@ -79,15 +79,15 @@ class DocsisMetricsTests(unittest.TestCase):
         ]
         text = "".join(exporter.docsis_channel_metrics(downstream, []))
         self.assertIn(
-            'cogeco_sagemcom_docsis_channel_lock{direction="downstream",channel="1"} 0',
+            'sagemcom_docsis_channel_lock{direction="downstream",channel="1"} 0',
             text,
         )
         self.assertIn(
-            'cogeco_sagemcom_docsis_channel_info{direction="downstream",channel="1",modulation="QAM256"} 1',
+            'sagemcom_docsis_channel_info{direction="downstream",channel="1",modulation="QAM256"} 1',
             text,
         )
         self.assertIn(
-            'cogeco_sagemcom_docsis_downstream_codewords_total{direction="downstream",channel="1",type="uncorrectable"} 1',
+            'sagemcom_docsis_downstream_codewords_total{direction="downstream",channel="1",type="uncorrectable"} 1',
             text,
         )
         self.assertNotIn("modulation=\"QAM256\",type=", text)
@@ -104,9 +104,9 @@ class DocsisMetricsTests(unittest.TestCase):
 class RegistrationTests(unittest.TestCase):
     def test_registration_info_stable_identity(self) -> None:
         text = "".join(exporter.registration_metrics("Operational"))
-        self.assertIn("cogeco_sagemcom_docsis_registered 1", text)
+        self.assertIn("sagemcom_docsis_registered 1", text)
         self.assertIn(
-            'cogeco_sagemcom_docsis_registration_info{status="Operational"} 1',
+            'sagemcom_docsis_registration_info{status="Operational"} 1',
             text,
         )
 
@@ -127,10 +127,10 @@ class EthernetMetricsTests(unittest.TestCase):
         }
         with mock.patch.object(exporter, "EXPORT_DEVICE_IDENTIFIERS", False):
             text = "".join(exporter.ethernet_metrics(interfaces))
-        self.assertIn('cogeco_sagemcom_ethernet_up{alias="LAN1",ifc="eth0",role="LAN"} 1', text)
+        self.assertIn('sagemcom_ethernet_up{alias="LAN1",ifc="eth0",role="LAN"} 1', text)
         self.assertNotIn("mac=", text)
         self.assertIn(
-            'cogeco_sagemcom_ethernet_bytes_total{alias="LAN1",ifc="eth0",role="LAN",direction="transmit"} 20',
+            'sagemcom_ethernet_bytes_total{alias="LAN1",ifc="eth0",role="LAN",direction="transmit"} 20',
             text,
         )
 
@@ -260,7 +260,7 @@ class CollectMetricsTests(unittest.TestCase):
             side_effect=IndexError("boom"),
         ):
             text = exporter.collect_metrics()
-        self.assertIn("cogeco_sagemcom_docsis_scrape_up 0", text)
+        self.assertIn("sagemcom_docsis_scrape_up 0", text)
         self.assertIn('stage="docsis"', text)
         self.assertIn("IndexError", text)
 
@@ -281,7 +281,7 @@ class CollectMetricsTests(unittest.TestCase):
             handler.do_GET()
         self.assertEqual(sent, [200])
         body = handler.wfile.getvalue().decode()
-        self.assertIn("cogeco_sagemcom_docsis_scrape_up 0", body)
+        self.assertIn("sagemcom_docsis_scrape_up 0", body)
 
 
 class ValidateConfigTests(unittest.TestCase):
