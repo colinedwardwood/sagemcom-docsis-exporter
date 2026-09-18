@@ -248,6 +248,55 @@ class ModemClientFixtureTests(unittest.TestCase):
                 client.login()
 
 
+class ModemLogTests(unittest.TestCase):
+    def setUp(self) -> None:
+        exporter._modem_log_seen.clear()
+
+    def test_normalizes_string_list_and_empty(self) -> None:
+        self.assertEqual(exporter.modem_log_lines(""), [])
+        self.assertEqual(exporter.modem_log_lines(None), [])
+        self.assertEqual(exporter.modem_log_lines("a  b\n\n c \n"), ["a b", "c"])
+        self.assertEqual(exporter.modem_log_lines(["x", {"k": 1}]), ["x", '{"k": 1}'])
+
+    def test_only_new_lines_are_returned(self) -> None:
+        self.assertEqual(exporter.new_modem_log_lines("a\nb"), ["a", "b"])
+        self.assertEqual(exporter.new_modem_log_lines("a\nb"), [])
+        self.assertEqual(exporter.new_modem_log_lines("a\nb\nc"), ["c"])
+
+    def test_ring_buffer_head_truncation(self) -> None:
+        exporter.new_modem_log_lines("a\nb\nc")
+        self.assertEqual(exporter.new_modem_log_lines("b\nc\nd"), ["d"])
+
+    def test_reboot_empties_buffer_then_repeats_are_new_again(self) -> None:
+        exporter.new_modem_log_lines("a\nb")
+        self.assertEqual(exporter.new_modem_log_lines(""), [])
+        self.assertEqual(exporter.new_modem_log_lines("a"), ["a"])
+
+    def test_repeated_identical_lines_counted(self) -> None:
+        exporter.new_modem_log_lines("a")
+        self.assertEqual(exporter.new_modem_log_lines("a\na"), ["a"])
+
+    def test_emit_caps_and_truncates(self) -> None:
+        text = "\n".join(f"line{i}" for i in range(5)) + "\n" + "x" * 900
+        with mock.patch.object(exporter, "MODEM_LOG_MAX_LINES_PER_SCRAPE", 3), self.assertLogs(
+            exporter.log, level="INFO"
+        ) as captured:
+            exporter.emit_modem_log(text)
+        messages = [r.getMessage() for r in captured.records]
+        self.assertIn("modem-log: 6 new lines, emitting newest 3", messages)
+        self.assertEqual(messages[-3:], ["modem-log: line3", "modem-log: line4", "modem-log: " + "x" * 500])
+
+    def test_optional_path_error_yields_none(self) -> None:
+        ok = {"id": 0, "error": {"code": exporter.XMO_NO_ERR, "description": "ok"},
+              "callbacks": [{"parameters": {"value": 7}}]}
+        bad = {"id": 1, "error": {"code": 1, "description": "XMO_UNKNOWN_PATH_ERR"}, "callbacks": []}
+        client = exporter.ModemClient(deadline=exporter.Deadline(10))
+        with mock.patch.object(client, "request", return_value={"actions": [ok, bad]}):
+            self.assertEqual(client.get_values(("a", "b"), optional=frozenset({"b"})), [7, None])
+            with self.assertRaises(ValueError):
+                client.get_values(("a", "b"))
+
+
 class CollectMetricsTests(unittest.TestCase):
     def test_docsis_failure_returns_up_zero_not_raise(self) -> None:
         with mock.patch.object(exporter, "COLLECT_DOCSIS", True), mock.patch.object(

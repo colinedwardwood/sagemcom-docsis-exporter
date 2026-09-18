@@ -77,9 +77,24 @@ An Alloy scrape fragment lives in [`alloy/sagemcom-docsis.alloy`](alloy/sagemcom
 | `COLLECT_DOCSIS` | `true` | Login + channel/system scrape; set `false` for GUI/probes only |
 | `COLLECT_ETHERNET` | `true` | Include Ethernet interface stats in the same session |
 | `COLLECT_SYSTEM` | `true` | Include memory/CPU/temperature/identity |
+| `COLLECT_MODEM_LOG` | `true` | Copy new lines from the modem's RAM system log into the exporter's own log as `modem-log: ...` (see below) |
+| `MODEM_LOG_MAX_LINES_PER_SCRAPE` | `200` | Cap on lines emitted per scrape; the newest are kept |
 | `CHECK_API_LOGIN` | `false` | Extra login-only probe (second session). Leave off unless debugging auth |
 | `SCRAPE_BUDGET_SECONDS` | `25` | Hard ceiling for modem HTTP work; keep below scrape_timeout |
 | `EXPORT_DEVICE_IDENTIFIERS` | `false` | When `true`, export modem `serial` and Ethernet `mac` labels |
+
+## Modem log capture
+
+The modem keeps its log in a 1 MB RAM buffer that a reboot wipes, and remote syslog is
+ISP-locked. So each scrape also reads `Device/DeviceInfo/SimpleLogs/SystemLog` (the
+path the GUI's Logs page uses) in the same session and logs lines it has not seen
+before as `modem-log: <line>`. Under systemd these land in journald, and Alloy ships the
+journal to Loki, so the log survives a modem reboot. Query e.g.
+`{unit="sagemcom-docsis-exporter"} |= "modem-log:"`.
+
+Limits: nothing is captured while the modem's API is hung (scrapes fail), so you get
+the lines up to the hang, not during it. Verbosity follows the modem's `LogLevel`
+(currently `Warning`), and a failing log read never fails the metrics scrape.
 
 ## Firmware notes
 

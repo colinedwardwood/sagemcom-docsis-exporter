@@ -12,6 +12,7 @@ import ssl
 import sys
 import threading
 import time
+from collections import Counter
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -32,6 +33,10 @@ CHECK_API_LOGIN = os.environ.get("CHECK_API_LOGIN", "false").lower() == "true"
 COLLECT_DOCSIS = os.environ.get("COLLECT_DOCSIS", "true").lower() == "true"
 COLLECT_ETHERNET = os.environ.get("COLLECT_ETHERNET", "true").lower() == "true"
 COLLECT_SYSTEM = os.environ.get("COLLECT_SYSTEM", "true").lower() == "true"
+# The modem's log lives in RAM and is wiped on reboot, so copy new lines into our own
+# journal each scrape (Alloy ships it to Loki). Rides the existing session: no extra login.
+COLLECT_MODEM_LOG = os.environ.get("COLLECT_MODEM_LOG", "true").lower() == "true"
+MODEM_LOG_MAX_LINES_PER_SCRAPE = int(os.environ.get("MODEM_LOG_MAX_LINES_PER_SCRAPE", "200"))
 # Serial / MAC labels go to your metrics backend. Off by default.
 EXPORT_DEVICE_IDENTIFIERS = os.environ.get("EXPORT_DEVICE_IDENTIFIERS", "false").lower() == "true"
 # Hard ceiling for modem work; must stay under Alloy/Prometheus scrape_timeout.
@@ -44,6 +49,8 @@ SESSION_NSS = (
     {"name": "tr181", "uri": "http://sagemcom.com/tr181-data"},
 )
 XMO_NO_ERR = 16777238
+MODEM_LOG_PATH = "Device/DeviceInfo/SimpleLogs/SystemLog"
+MODEM_LOG_LINE_LIMIT = 500
 REGISTERED_STATUSES = frozenset(
     {
         "operational",
@@ -221,7 +228,10 @@ class ModemClient:
             self.session_id = "0"
             self.nonce = ""
 
-    def get_values(self, paths: tuple[str, ...]) -> list[object]:
+    def get_values(
+        self, paths: tuple[str, ...], optional: frozenset[str] = frozenset()
+    ) -> list[object]:
+        """Fetch paths in one request. A failing path in `optional` yields None instead of raising."""
         reply = self.request(
             [
                 {
@@ -235,8 +245,11 @@ class ModemClient:
             ]
         )
         values: list[object] = []
-        for action in reply["actions"]:
+        for path, action in zip(paths, reply["actions"]):
             if action["error"]["code"] != XMO_NO_ERR:
+                if path in optional:
+                    values.append(None)
+                    continue
                 raise ValueError(action["error"]["description"])
             values.append(action["callbacks"][0]["parameters"]["value"])
         return values
@@ -266,10 +279,13 @@ class ModemClient:
                 )
             )
 
+        if COLLECT_MODEM_LOG:
+            paths.append(MODEM_LOG_PATH)
+
         logout_error: str | None = None
         self.login()
         try:
-            values = self.get_values(tuple(paths))
+            values = self.get_values(tuple(paths), optional=frozenset({MODEM_LOG_PATH}))
         finally:
             try:
                 self.logout()
@@ -289,6 +305,8 @@ class ModemClient:
         }
         if COLLECT_ETHERNET:
             snapshot["ethernet"] = by_path["Device/Ethernet/Interfaces"]
+        if COLLECT_MODEM_LOG:
+            snapshot["modem_log"] = by_path[MODEM_LOG_PATH]
         if COLLECT_SYSTEM:
             snapshot["model"] = by_path["Device/DeviceInfo/ModelName"]
             snapshot["software"] = by_path["Device/DeviceInfo/SoftwareVersion"]
@@ -584,8 +602,58 @@ def registration_metrics(status: object) -> list[str]:
     ]
 
 
+# Lines from the previous scrape's log buffer, for de-duplication. Guarded by _MODEM_LOCK.
+_modem_log_seen: Counter[str] = Counter()
+
+
+def modem_log_lines(value: object) -> list[str]:
+    """Normalize the SystemLog value (string, or list of records) into non-empty lines."""
+    if value in (None, ""):
+        return []
+    if isinstance(value, str):
+        raw = value.splitlines()
+    elif isinstance(value, list):
+        raw = [item if isinstance(item, str) else json.dumps(item, sort_keys=True) for item in value]
+    else:
+        raw = [json.dumps(value, sort_keys=True)]
+    return [" ".join(line.split()) for line in raw if line.strip()]
+
+
+def new_modem_log_lines(value: object) -> list[str]:
+    """Lines not present in the previous scrape's buffer.
+
+    Counts occurrences rather than tracking a position, so it copes with the RAM ring
+    dropping old lines from the head, and with a reboot emptying the buffer entirely.
+    """
+    global _modem_log_seen
+    lines = modem_log_lines(value)
+    running: Counter[str] = Counter()
+    fresh: list[str] = []
+    for line in lines:
+        running[line] += 1
+        if running[line] > _modem_log_seen[line]:
+            fresh.append(line)
+    _modem_log_seen = running
+    return fresh
+
+
+def emit_modem_log(value: object) -> None:
+    fresh = new_modem_log_lines(value)
+    if len(fresh) > MODEM_LOG_MAX_LINES_PER_SCRAPE:
+        log.warning(
+            "modem-log: %d new lines, emitting newest %d",
+            len(fresh),
+            MODEM_LOG_MAX_LINES_PER_SCRAPE,
+        )
+        fresh = fresh[-MODEM_LOG_MAX_LINES_PER_SCRAPE:]
+    for line in fresh:
+        log.info("modem-log: %s", line[:MODEM_LOG_LINE_LIMIT])
+
+
 def modem_api_metrics(client: ModemClient) -> tuple[list[str], str | None]:
     snapshot = client.modem_snapshot()
+    if COLLECT_MODEM_LOG:
+        emit_modem_log(snapshot.get("modem_log"))
     lines = [
         "# HELP sagemcom_uptime_seconds Modem uptime; a decrease indicates a restart.\n",
         "# TYPE sagemcom_uptime_seconds gauge\n",
