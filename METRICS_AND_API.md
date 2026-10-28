@@ -19,6 +19,8 @@ Transport/RPC specs: [`openapi.yaml`](openapi.yaml), [`openrpc.json`](openrpc.js
 | `sagemcom_api_request_duration_seconds` | gauge | | Login duration; `CHECK_API_LOGIN=true` only |
 | `sagemcom_docsis_scrape_up` | gauge | | `1` if the batched TR-181 scrape succeeded |
 | `sagemcom_logout_success` | gauge | | `1` if session logout succeeded |
+| `sagemcom_modem_log_fetch_success` | gauge | | `1` if the latest event-log download worked, `0` if it failed (absent until the first attempt or when `COLLECT_MODEM_LOG=false`) |
+| `sagemcom_modem_log_lines` | gauge | | Event-log lines in the latest download, excluding login/logout noise; `0` suggests capture is broken |
 | `sagemcom_scrape_error_info` | gauge | `stage`, `error` | Latest failure detail |
 | `sagemcom_scrape_duration_seconds` | gauge | | Full `/metrics` wall time |
 | `sagemcom_internet_probe_up` | gauge | `target` | TCP connect from the exporter host |

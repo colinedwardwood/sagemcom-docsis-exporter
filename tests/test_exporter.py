@@ -251,6 +251,8 @@ class ModemClientFixtureTests(unittest.TestCase):
 class ModemLogTests(unittest.TestCase):
     def setUp(self) -> None:
         exporter._modem_log_seen.clear()
+        exporter._modem_log_next_fetch = 0.0
+        exporter._modem_log_state.update({"ok": None, "lines": 0})
 
     def test_normalizes_string_list_and_empty(self) -> None:
         self.assertEqual(exporter.modem_log_lines(""), [])
@@ -285,6 +287,113 @@ class ModemLogTests(unittest.TestCase):
         messages = [r.getMessage() for r in captured.records]
         self.assertIn("modem-log: 6 new lines, emitting newest 3", messages)
         self.assertEqual(messages[-3:], ["modem-log: line3", "modem-log: line4", "modem-log: " + "x" * 500])
+
+    def test_own_login_logout_noise_is_dropped(self) -> None:
+        text = (
+            "28.10.2026 11:33:03 INF SYS 0 Modem login was successful\n"
+            "28.10.2026 11:33:24 INF DOCSIS 0 Started Unicast Maintenance Ranging - No Response received - T3\n"
+            "28.10.2026 11:33:24 INF SYS 0 Modem logout was successful\n"
+        )
+        self.assertEqual(
+            exporter.modem_log_lines(text),
+            ["28.10.2026 11:33:24 INF DOCSIS 0 Started Unicast Maintenance Ranging - No Response received - T3"],
+        )
+
+    def test_not_fetched_scrape_keeps_dedup_state(self) -> None:
+        exporter.new_modem_log_lines("a\nb")
+        exporter.emit_modem_log(None)  # a scrape that skipped the download
+        self.assertEqual(exporter.new_modem_log_lines("a\nb\nc"), ["c"])
+
+    def test_empty_log_warns_and_counts_zero_lines(self) -> None:
+        with self.assertLogs(exporter.log, level="WARNING") as captured:
+            exporter.emit_modem_log("")
+        self.assertIn("empty log", captured.records[0].getMessage())
+        self.assertEqual(exporter._modem_log_state["lines"], 0.0)
+
+    def test_fetch_schedule(self) -> None:
+        deadline = exporter.Deadline(25)
+        with mock.patch.object(exporter, "COLLECT_MODEM_LOG", True):
+            self.assertTrue(exporter._modem_log_due(deadline))
+            exporter._modem_log_note_attempt(True)
+            self.assertFalse(exporter._modem_log_due(deadline))
+            self.assertEqual(exporter._modem_log_state["ok"], 1.0)
+            # A failure is retried sooner than the normal interval.
+            exporter._modem_log_note_attempt(False)
+            self.assertEqual(exporter._modem_log_state["ok"], 0.0)
+            wait = exporter._modem_log_next_fetch - exporter.time.monotonic()
+            self.assertLessEqual(wait, exporter.MODEM_LOG_RETRY_SECONDS)
+            # Not worth starting a big download with the scrape budget nearly gone.
+            exporter._modem_log_next_fetch = 0.0
+            self.assertFalse(exporter._modem_log_due(exporter.Deadline(2)))
+        with mock.patch.object(exporter, "COLLECT_MODEM_LOG", False):
+            self.assertFalse(exporter._modem_log_due(deadline))
+
+    def _rpc_reply(self, uri: str) -> dict:
+        return {
+            "actions": [
+                {"id": 0, "error": {"code": exporter.XMO_NO_ERR, "description": "ok"},
+                 "callbacks": [{"parameters": {"uri": uri}}]}
+            ]
+        }
+
+    def test_download_uses_rpc_then_basic_auth_on_modem_address(self) -> None:
+        class FakeResponse:
+            def read(self, size: int = -1) -> bytes:
+                return "a\u00e9\nb\n".encode()
+
+            def __enter__(self) -> "FakeResponse":
+                return self
+
+            def __exit__(self, *args: object) -> None:
+                return None
+
+        client = exporter.ModemClient(deadline=exporter.Deadline(10))
+        with mock.patch.object(exporter, "USERNAME", "admin"), mock.patch.object(
+            exporter, "PASSWORD", "pw"
+        ), mock.patch.object(client, "request", return_value=self._rpc_reply("/download/tok/abcd/utilsLogFile")) as rpc, \
+                mock.patch.object(exporter.urllib.request, "urlopen", return_value=FakeResponse()) as opened:
+            text = client.download_operator_log()
+        self.assertEqual(text, "a\u00e9\nb\n")
+        action = rpc.call_args.args[0][0]
+        self.assertEqual(action["method"], "getVendorLogDownloadURI")
+        self.assertEqual(action["xpath"], "Device/DeviceInfo/VendorLogFiles/VendorLogFile[@uid='1']")
+        request = opened.call_args.args[0]
+        self.assertEqual(request.full_url, f"https://{exporter.ADDRESS}/download/tok/abcd/utilsLogFile")
+        self.assertEqual(request.get_header("Authorization"), "Basic YWRtaW46cHc=")
+
+    def test_download_refuses_foreign_host_or_unexpected_path(self) -> None:
+        client = exporter.ModemClient(deadline=exporter.Deadline(10))
+        for uri in ("https://evil.example/download/x", "/other/path", "//evil.example/download/x"):
+            with self.subTest(uri=uri), mock.patch.object(
+                client, "request", return_value=self._rpc_reply(uri)
+            ), mock.patch.object(exporter.urllib.request, "urlopen") as opened:
+                with self.assertRaises(ValueError):
+                    client.download_operator_log()
+                opened.assert_not_called()
+
+    def test_log_download_failure_does_not_fail_the_snapshot(self) -> None:
+        client = exporter.ModemClient(deadline=exporter.Deadline(25))
+        with mock.patch.object(exporter, "COLLECT_MODEM_LOG", True), mock.patch.object(
+            client, "login"
+        ), mock.patch.object(client, "logout"), mock.patch.object(
+            client, "get_values", side_effect=lambda paths, **kw: [0] * len(paths)
+        ), mock.patch.object(
+            client, "download_operator_log", side_effect=OSError("boom")
+        ), self.assertLogs(exporter.log, level="WARNING"):
+            snapshot = client.modem_snapshot()
+        self.assertNotIn("modem_log", snapshot)
+        self.assertEqual(exporter._modem_log_state["ok"], 0.0)
+
+    def test_log_download_success_lands_in_snapshot(self) -> None:
+        client = exporter.ModemClient(deadline=exporter.Deadline(25))
+        with mock.patch.object(exporter, "COLLECT_MODEM_LOG", True), mock.patch.object(
+            client, "login"
+        ), mock.patch.object(client, "logout"), mock.patch.object(
+            client, "get_values", side_effect=lambda paths, **kw: [0] * len(paths)
+        ), mock.patch.object(client, "download_operator_log", return_value="x\n"):
+            snapshot = client.modem_snapshot()
+        self.assertEqual(snapshot["modem_log"], "x\n")
+        self.assertEqual(exporter._modem_log_state["ok"], 1.0)
 
     def test_optional_path_error_yields_none(self) -> None:
         ok = {"id": 0, "error": {"code": exporter.XMO_NO_ERR, "description": "ok"},

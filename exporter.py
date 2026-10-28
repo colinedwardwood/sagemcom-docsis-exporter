@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import logging
 import os
 import random
+import re
 import socket
 import ssl
 import sys
@@ -33,10 +35,13 @@ CHECK_API_LOGIN = os.environ.get("CHECK_API_LOGIN", "false").lower() == "true"
 COLLECT_DOCSIS = os.environ.get("COLLECT_DOCSIS", "true").lower() == "true"
 COLLECT_ETHERNET = os.environ.get("COLLECT_ETHERNET", "true").lower() == "true"
 COLLECT_SYSTEM = os.environ.get("COLLECT_SYSTEM", "true").lower() == "true"
-# The modem's log lives in RAM and is wiped on reboot, so copy new lines into our own
-# journal each scrape (Alloy ships it to Loki). Rides the existing session: no extra login.
+# Copy new lines of the modem's event log into our own journal (Alloy ships it to Loki), so
+# the modem's DOCSIS view of an outage is searchable next to everything else. Rides the
+# existing session: no extra login.
 COLLECT_MODEM_LOG = os.environ.get("COLLECT_MODEM_LOG", "true").lower() == "true"
 MODEM_LOG_MAX_LINES_PER_SCRAPE = int(os.environ.get("MODEM_LOG_MAX_LINES_PER_SCRAPE", "200"))
+# The log is a ~1.6 MB download, so fetch it every few minutes rather than every scrape.
+MODEM_LOG_INTERVAL_SECONDS = float(os.environ.get("MODEM_LOG_INTERVAL_SECONDS", "300"))
 # Serial / MAC labels go to your metrics backend. Off by default.
 EXPORT_DEVICE_IDENTIFIERS = os.environ.get("EXPORT_DEVICE_IDENTIFIERS", "false").lower() == "true"
 # Hard ceiling for modem work; must stay under Alloy/Prometheus scrape_timeout.
@@ -49,8 +54,15 @@ SESSION_NSS = (
     {"name": "tr181", "uri": "http://sagemcom.com/tr181-data"},
 )
 XMO_NO_ERR = 16777238
-MODEM_LOG_PATH = "Device/DeviceInfo/SimpleLogs/SystemLog"
+# The GUI's Logs page does not read a data-model value (SimpleLogs/SystemLog is empty on this
+# firmware). It asks the modem to publish the log file and downloads it over HTTP Basic auth.
+MODEM_LOG_XPATH = "Device/DeviceInfo/VendorLogFiles/VendorLogFile[@uid='1']"
+MODEM_LOG_RPC = "getVendorLogDownloadURI"
+MODEM_LOG_MAX_BYTES = 8 * 1024 * 1024
 MODEM_LOG_LINE_LIMIT = 500
+MODEM_LOG_RETRY_SECONDS = 60.0
+# Every scrape's own login/logout is logged by the modem; they would be ~99% of the volume.
+MODEM_LOG_NOISE = re.compile(r"\bSYS \d+ Modem (?:login|logout) was successful\b")
 REGISTERED_STATUSES = frozenset(
     {
         "operational",
@@ -279,13 +291,21 @@ class ModemClient:
                 )
             )
 
-        if COLLECT_MODEM_LOG:
-            paths.append(MODEM_LOG_PATH)
-
+        modem_log: str | None = None
+        modem_log_error: str | None = None
         logout_error: str | None = None
         self.login()
         try:
-            values = self.get_values(tuple(paths), optional=frozenset({MODEM_LOG_PATH}))
+            values = self.get_values(tuple(paths))
+            if _modem_log_due(self.deadline):
+                try:
+                    modem_log = self.download_operator_log()
+                except DeadlineExceeded:
+                    raise
+                except Exception as exc:  # noqa: BLE001 — a log problem must not fail the metrics scrape
+                    modem_log_error = sanitize_error_label(f"{type(exc).__name__}: {exc}", 200)
+                    log.warning("modem log fetch failed: %s", modem_log_error)
+                _modem_log_note_attempt(modem_log is not None)
         finally:
             try:
                 self.logout()
@@ -305,8 +325,8 @@ class ModemClient:
         }
         if COLLECT_ETHERNET:
             snapshot["ethernet"] = by_path["Device/Ethernet/Interfaces"]
-        if COLLECT_MODEM_LOG:
-            snapshot["modem_log"] = by_path[MODEM_LOG_PATH]
+        if modem_log is not None:
+            snapshot["modem_log"] = modem_log
         if COLLECT_SYSTEM:
             snapshot["model"] = by_path["Device/DeviceInfo/ModelName"]
             snapshot["software"] = by_path["Device/DeviceInfo/SoftwareVersion"]
@@ -320,6 +340,42 @@ class ModemClient:
         if logout_error:
             snapshot["logout_error"] = logout_error
         return snapshot
+
+    def download_operator_log(self) -> str:
+        """The modem's event log, as the GUI's Logs page gets it. Needs an open session.
+
+        An RPC publishes the log and returns a relative download path; the download itself is
+        guarded by HTTP Basic auth (realm "download") using the same login. The credentials only
+        ever go to the modem's own address.
+        """
+        reply = self.request(
+            [
+                {
+                    "id": 0,
+                    "method": MODEM_LOG_RPC,
+                    "xpath": MODEM_LOG_XPATH,
+                    "parameters": {"FileName": "utilsLogFile"},
+                }
+            ]
+        )
+        action = reply["actions"][0]
+        if action["error"]["code"] != XMO_NO_ERR:
+            raise ValueError(action["error"]["description"])
+        uri = str(action["callbacks"][0]["parameters"]["uri"])
+        parsed = urllib.parse.urlsplit(uri)
+        if (parsed.netloc and parsed.netloc != ADDRESS) or not parsed.path.startswith("/download/"):
+            raise ValueError(f"unexpected log download location: {parsed.path[:40]!r}")
+        token = base64.b64encode(f"{USERNAME}:{PASSWORD}".encode()).decode()
+        http_request = urllib.request.Request(
+            f"https://{ADDRESS}{parsed.path}",
+            headers={"Authorization": f"Basic {token}"},
+            method="GET",
+        )
+        with urllib.request.urlopen(http_request, context=self.context, timeout=self._timeout()) as response:
+            raw = response.read(MODEM_LOG_MAX_BYTES + 1)
+        if len(raw) > MODEM_LOG_MAX_BYTES:
+            raise ValueError("modem log exceeds size cap")
+        return raw.decode("utf-8", "replace")
 
     def check_login(self) -> tuple[bool, float]:
         started = time.monotonic()
@@ -602,8 +658,26 @@ def registration_metrics(status: object) -> list[str]:
     ]
 
 
-# Lines from the previous scrape's log buffer, for de-duplication. Guarded by _MODEM_LOCK.
+# Lines from the previous fetch of the log, for de-duplication. Guarded by _MODEM_LOCK.
 _modem_log_seen: Counter[str] = Counter()
+# Next monotonic time a log fetch is due, and the outcome of the latest attempt
+# (None = never tried). Guarded by _MODEM_LOCK.
+_modem_log_next_fetch = 0.0
+_modem_log_state: dict[str, float | None] = {"ok": None, "lines": 0}
+
+
+def _modem_log_due(deadline: Deadline) -> bool:
+    """Whether to fetch the log in this scrape. Skipped when the scrape budget is nearly spent."""
+    if not COLLECT_MODEM_LOG or time.monotonic() < _modem_log_next_fetch:
+        return False
+    return deadline.deadline - time.monotonic() > 5.0
+
+
+def _modem_log_note_attempt(ok: bool) -> None:
+    global _modem_log_next_fetch
+    _modem_log_state["ok"] = 1.0 if ok else 0.0
+    wait = MODEM_LOG_INTERVAL_SECONDS if ok else min(MODEM_LOG_INTERVAL_SECONDS, MODEM_LOG_RETRY_SECONDS)
+    _modem_log_next_fetch = time.monotonic() + wait
 
 
 def modem_log_lines(value: object) -> list[str]:
@@ -616,7 +690,8 @@ def modem_log_lines(value: object) -> list[str]:
         raw = [item if isinstance(item, str) else json.dumps(item, sort_keys=True) for item in value]
     else:
         raw = [json.dumps(value, sort_keys=True)]
-    return [" ".join(line.split()) for line in raw if line.strip()]
+    lines = (" ".join(line.split()) for line in raw if line.strip())
+    return [line for line in lines if not MODEM_LOG_NOISE.search(line)]
 
 
 def new_modem_log_lines(value: object) -> list[str]:
@@ -638,7 +713,12 @@ def new_modem_log_lines(value: object) -> list[str]:
 
 
 def emit_modem_log(value: object) -> None:
+    if value is None:
+        return  # not fetched this scrape; keep the de-duplication state
     fresh = new_modem_log_lines(value)
+    _modem_log_state["lines"] = float(sum(_modem_log_seen.values()))
+    if isinstance(value, str) and not value.strip():
+        log.warning("modem-log: the modem returned an empty log; capture may be broken")
     if len(fresh) > MODEM_LOG_MAX_LINES_PER_SCRAPE:
         log.warning(
             "modem-log: %d new lines, emitting newest %d",
@@ -658,6 +738,23 @@ def modem_api_metrics(client: ModemClient) -> tuple[list[str], str | None]:
         "# HELP sagemcom_uptime_seconds Modem uptime; a decrease indicates a restart.\n",
         "# TYPE sagemcom_uptime_seconds gauge\n",
     ]
+    if COLLECT_MODEM_LOG and _modem_log_state["ok"] is not None:
+        lines.extend(
+            _help_type(
+                "sagemcom_modem_log_fetch_success",
+                "1 if the latest modem event-log download succeeded, 0 if it failed.",
+                "gauge",
+            )
+        )
+        lines.append(metric("sagemcom_modem_log_fetch_success", float(_modem_log_state["ok"])))
+        lines.extend(
+            _help_type(
+                "sagemcom_modem_log_lines",
+                "Event-log lines in the latest download, excluding login/logout noise. 0 suggests capture is broken.",
+                "gauge",
+            )
+        )
+        lines.append(metric("sagemcom_modem_log_lines", float(_modem_log_state["lines"] or 0)))
     uptime = finite_float(snapshot["uptime"])
     if uptime is not None:
         lines.append(metric("sagemcom_uptime_seconds", uptime))

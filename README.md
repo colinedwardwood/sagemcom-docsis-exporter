@@ -77,24 +77,41 @@ An Alloy scrape fragment lives in [`alloy/sagemcom-docsis.alloy`](alloy/sagemcom
 | `COLLECT_DOCSIS` | `true` | Login + channel/system scrape; set `false` for GUI/probes only |
 | `COLLECT_ETHERNET` | `true` | Include Ethernet interface stats in the same session |
 | `COLLECT_SYSTEM` | `true` | Include memory/CPU/temperature/identity |
-| `COLLECT_MODEM_LOG` | `true` | Copy new lines from the modem's RAM system log into the exporter's own log as `modem-log: ...` (see below) |
+| `COLLECT_MODEM_LOG` | `true` | Copy new lines from the modem's event log into the exporter's own log as `modem-log: ...` (see below) |
 | `MODEM_LOG_MAX_LINES_PER_SCRAPE` | `200` | Cap on lines emitted per scrape; the newest are kept |
+| `MODEM_LOG_INTERVAL_SECONDS` | `300` | How often to download the modem's event log (~1.6 MB) |
 | `CHECK_API_LOGIN` | `false` | Extra login-only probe (second session). Leave off unless debugging auth |
 | `SCRAPE_BUDGET_SECONDS` | `25` | Hard ceiling for modem HTTP work; keep below scrape_timeout |
 | `EXPORT_DEVICE_IDENTIFIERS` | `false` | When `true`, export modem `serial` and Ethernet `mac` labels |
 
 ## Modem log capture
 
-The modem keeps its log in a 1 MB RAM buffer that a reboot wipes, and remote syslog is
-ISP-locked. So each scrape also reads `Device/DeviceInfo/SimpleLogs/SystemLog` (the
-path the GUI's Logs page uses) in the same session and logs lines it has not seen
-before as `modem-log: <line>`. Under systemd these land in journald, and Alloy ships the
-journal to Loki, so the log survives a modem reboot. Query e.g.
-`{unit="sagemcom-docsis-exporter"} |= "modem-log:"`.
+The modem's event log (DOCSIS ranging, registration and CMTS messages) is the best record of
+*why* the cable link dropped, and remote syslog is ISP-locked. So the exporter copies it into
+its own log as `modem-log: <line>`. Under systemd these land in journald, and Alloy ships the
+journal to Loki. Query e.g. `{unit="sagemcom-docsis-exporter.service"} |= "modem-log:"`. The
+Loki timestamp is when the line was copied; the event's own time is the `DD.MM.YYYY HH:MM:SS`
+inside the line (modem local time).
 
-Limits: nothing is captured while the modem's API is hung (scrapes fail), so you get
-the lines up to the hang, not during it. Verbosity follows the modem's `LogLevel`
-(currently `Warning`), and a failing log read never fails the metrics scrape.
+How it gets the log: `Device/DeviceInfo/SimpleLogs/SystemLog` is empty on this firmware. The
+GUI's Logs page instead calls the `getVendorLogDownloadURI` RPC on
+`Device/DeviceInfo/VendorLogFiles/VendorLogFile[@uid='1']`, then downloads the returned
+`/download/...` path with HTTP Basic auth (realm `download`). The exporter does the same in
+the existing session, using the same credentials, and only ever sends them to the modem's
+own address. That RPC makes the modem build a file to download; it changes no configuration.
+
+- The download is ~1.6 MB, so it runs every `MODEM_LOG_INTERVAL_SECONDS` (default 300s), not
+  every scrape. A failed fetch is retried after 60s and never fails the metrics scrape.
+- The modem logs its own login/logout for every scrape (two lines a minute); those are dropped.
+- Only lines not seen in the previous download are emitted. The first fetch after a restart
+  emits the newest `MODEM_LOG_MAX_LINES_PER_SCRAPE` (default 200) events.
+- The log survives a modem reboot on this firmware (about nine days were retained), but it
+  is a fixed-size ring, and copying it to Loki keeps it much longer.
+- Boot-time lines are stamped `01.01.2013` because the modem has no clock yet.
+- Nothing is captured while the modem's API is hung (scrapes fail), so you get the lines up
+  to the hang, not during it.
+- `sagemcom_modem_log_fetch_success` and `sagemcom_modem_log_lines` expose whether capture is
+  working. A `0` for either on a modem that is up means capture is broken.
 
 ## Firmware notes
 
